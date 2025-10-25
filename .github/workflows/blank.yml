@@ -66,21 +66,40 @@ jobs:
       run: |
         kind load docker-image ${{ needs.build-and-push.outputs.image }}
 
-    - name: 5. Install Cert-Manager
-      uses: jetstack/helm-charts/cert-manager@v0.1.0
-      with:
-        version: v1.14.3
+    - name: 5. Install Cert-Manager CRDs
+      run: |
+        # Install the Custom Resource Definitions (CRDs) required by Cert-Manager
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.3/cert-manager.crds.yaml
+
+    - name: 6. Install Cert-Manager using Helm
+      run: |
+        # Add the official Cert-Manager Helm repository
+        helm repo add jetstack https://charts.jetstack.io
+        helm repo update
+
+        # Install cert-manager into the 'cert-manager' namespace
+        helm upgrade --install cert-manager jetstack/cert-manager \
+          --namespace cert-manager --create-namespace \
+          --version v1.14.3 \
+          --set installCRDs=false # CRDs are already installed in the previous step
         
-    - name: 6. Apply Kubernetes Manifests (Deployment, Service, TLS)
+        # Wait for the Cert-Manager pods to be ready
+        echo "Waiting for Cert-Manager pods to start..."
+        kubectl wait --namespace cert-manager \
+          --for=condition=ready pod \
+          --selector=app.kubernetes.io/instance=cert-manager \
+          --timeout=180s
+        
+    - name: 7. Apply Kubernetes Manifests (Deployment, Service, TLS)
       run: |
         # Apply all files in the kubernetes directory
         kubectl apply -f kubernetes/
         
-    - name: 7. Wait for Ingress to be Ready
+    - name: 8. Wait for Ingress to be Ready
       run: |
         kubectl wait --for=condition=Available deployment/wisecow-deployment --timeout=120s
         
-    - name: 8. Verification
+    - name: 9. Verification
       run: |
         # Note: You'll need to update /etc/hosts in the runner for the domain name
         echo "127.0.0.1 wisecow.yourdomain.com" | sudo tee -a /etc/hosts
