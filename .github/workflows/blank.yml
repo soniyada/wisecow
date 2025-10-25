@@ -55,7 +55,7 @@ jobs:
     - name: 2. Create Kind Cluster with Port Mapping
       uses: helm/kind-action@v1.9.0
       with:
-        config: kind-config.yaml
+        config: kubernetes/kind-config.yaml
 
     - name: 3. Install Nginx Ingress Controller
       run: |
