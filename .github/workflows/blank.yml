@@ -49,7 +49,9 @@ jobs:
       # 💡 NEW STEP: Set a clean, single-line output variable using the 'latest' tag reference.
       - name: 6. Set Image Reference Output
         id: set_image_ref
-        run: echo "image=${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+        run: |
+         IMAGE_REF="${{ secrets.DOCKER_USERNAME }}/wisecow:latest"
+         echo "image=$IMAGE_REF" >> $GITHUB_OUTPUT
 
   deploy-to-kind:
     runs-on: ubuntu-latest
