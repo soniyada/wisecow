@@ -8,13 +8,14 @@ on:
 
 env:
   REGISTRY: docker.io
+  # Define IMAGE_NAME using the secret, as required by the metadata-action and for clarity
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/wisecow
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
-      # 💡 Defining a clean single-line output for the next job's environment variable.
+      # Define the output using the clean variable from step 6
       image_ref: ${{ steps.set_image_ref.outputs.image }}
     steps:
       - name: 1. Checkout repository
@@ -46,21 +47,21 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # 💡 NEW STEP: Set a clean, single-line output variable using the 'latest' tag reference.
+      # 💡 CORRECTED STEP: Set a clean, single-line output that the next job can read.
       - name: 6. Set Image Reference Output
         id: set_image_ref
         run: |
-         IMAGE_REF="${{ secrets.DOCKER_USERNAME }}/wisecow:latest"
-         echo "image=$IMAGE_REF" >> $GITHUB_OUTPUT
+          # Define the full image tag locally, using the environment variable (which includes the secret).
+          IMAGE_TAG_REF="${{ env.IMAGE_NAME }}:latest"
+          # Pass the single string to the job output
+          echo "image=$IMAGE_TAG_REF" >> $GITHUB_OUTPUT
 
   deploy-to-kind:
     runs-on: ubuntu-latest
     needs: build-and-push
     
-    # 💡 FIX: Map the output of the previous job into a local environment variable (IMAGE_REF).
-    env:
-      IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
-
+    # ❌ REMOVED: The job-level 'env' block failed due to cross-job security restrictions.
+    
     steps:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
@@ -68,7 +69,6 @@ jobs:
       - name: 2. Create Kind Cluster with Port Mapping
         uses: helm/kind-action@v1.9.0
         with:
-          # Corrected path
           config: kubernetes/kind-config.yaml
 
       - name: 3. Install Nginx Ingress Controller
@@ -78,9 +78,13 @@ jobs:
 
       - name: 4. Load Docker Image into Kind Cluster
         run: |
-         IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
-         echo "Loading image $IMAGE_REF into Kind..."
-         kind load docker-image "$IMAGE_REF"
+          # ✅ FINAL FIX: Access the output directly inside the 'run' script (shell context).
+          # This is the guaranteed way to resolve the cross-job variable.
+          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+          
+          # Check and load the image
+          echo "Loading image $IMAGE_REF into Kind..."
+          kind load docker-image "$IMAGE_REF"
 
       # --- Cert-Manager Installation (Standard and Reliable) ---
       - name: 5. Install Cert-Manager CRDs
