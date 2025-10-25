@@ -76,8 +76,9 @@ jobs:
 
       - name: 4. Load Docker Image into Kind Cluster
         run: |
-         echo "Loading image ${{ needs.build-and-push.outputs.image_ref }} into Kind..."
-         kind load docker-image ${{ needs.build-and-push.outputs.image_ref }}
+         IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+         echo "Loading image $IMAGE_REF into Kind..."
+         kind load docker-image "$IMAGE_REF"
 
       # --- Cert-Manager Installation (Standard and Reliable) ---
       - name: 5. Install Cert-Manager CRDs
