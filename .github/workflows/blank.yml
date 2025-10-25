@@ -14,10 +14,8 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
-      # Renaming output to be clear it holds the primary tag
-      image_tag: ${{ steps.meta.outputs.tags }}
-      # 💡 Define a clean 'latest' tag for deployment clarity
-      image_latest_ref: ${{ env.IMAGE_NAME }}:latest
+      # 💡 Defining a clean single-line output for the next job's environment variable.
+      image_ref: ${{ steps.set_image_ref.outputs.image }}
     steps:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
@@ -48,18 +46,27 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      # 💡 NEW STEP: Set a clean, single-line output variable using the 'latest' tag reference.
+      - name: 6. Set Image Reference Output
+        id: set_image_ref
+        run: echo "image=${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+
   deploy-to-kind:
     runs-on: ubuntu-latest
     needs: build-and-push
+    
+    # 💡 FIX: Map the output of the previous job into a local environment variable (IMAGE_REF).
+    env:
+      IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+
     steps:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
-        
-      # Since kind load fails with multi-line output, we must ensure the image is loaded cleanly.
-      # We load the single 'latest' tag reference.
+
       - name: 2. Create Kind Cluster with Port Mapping
         uses: helm/kind-action@v1.9.0
         with:
+          # Corrected path
           config: kubernetes/kind-config.yaml
 
       - name: 3. Install Nginx Ingress Controller
@@ -69,10 +76,9 @@ jobs:
 
       - name: 4. Load Docker Image into Kind Cluster
         run: |
-          # ✅ FINAL FIX: Access the newly defined single-line output 'image_latest_ref'
-          # This should pass the correct string (e.g., 'username/wisecow:latest')
-          kind load docker-image ${{ needs.build-and-push.outputs.image_latest_ref }}
-          
+          # ✅ Use the environment variable, guaranteed to be a single string.
+          kind load docker-image $IMAGE_REF
+
       # --- Cert-Manager Installation (Standard and Reliable) ---
       - name: 5. Install Cert-Manager CRDs
         run: |
