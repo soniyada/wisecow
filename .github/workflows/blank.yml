@@ -48,12 +48,14 @@ jobs:
       - name: 6. Set Image Reference Output
         id: set_image_ref
         run: |
-          # Make sure we extract a single tag to pass to the next job.
+          # Grab the tags output (may be comma or newline separated)
           TAGS='${{ steps.meta.outputs.tags }}'
-          # split on comma or newline into an array
+          echo "meta tags: $TAGS"
+
+          # Split by comma and newline into an array
           IFS=$'\n,' read -r -a arr <<< "$TAGS"
 
-          # prefer a :latest tag if present
+          # Prefer :latest if present
           IMAGE_TAG_REF=""
           for t in "${arr[@]}"; do
             if [[ "$t" == *":latest" ]]; then
@@ -62,7 +64,7 @@ jobs:
             fi
           done
 
-          # fallback to first tag
+          # Fallback to first tag
           if [ -z "$IMAGE_TAG_REF" ] && [ ${#arr[@]} -gt 0 ]; then
             IMAGE_TAG_REF="${arr[0]}"
           fi
@@ -82,50 +84,54 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Ensure IMAGE_REF is available
+      - name: 2. Debug: show image_ref from previous job
+        run: |
+          echo "needs.build-and-push.outputs.image_ref='${{ needs.build-and-push.outputs.image_ref }}'"
+
+      - name: 3. Ensure IMAGE_REF is available
         run: |
           IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
           if [ -z "$IMAGE_REF" ]; then
             echo "ERROR: IMAGE_REF is empty. Nothing to load into kind." >&2
             exit 1
           fi
-          echo "IMAGE_REF=$IMAGE_REF" 
+          echo "IMAGE_REF=$IMAGE_REF"
 
-      - name: 3. Create Kind Cluster with Port Mapping
+      - name: 4. Create Kind Cluster with Port Mapping
         uses: helm/kind-action@v1.9.0
         with:
           config: kubernetes/kind-config.yaml
 
-      - name: 4. Log in to Docker Hub on deploy runner and pull image
+      - name: 5. Log in to Docker Hub on deploy runner
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: 5. Pull the pushed image so it's available locally (for kind load)
+      - name: 6. Pull the pushed image so it's available locally (for kind load)
         run: |
           IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
           echo "Pulling $IMAGE_REF on the deploy runner..."
           docker pull "$IMAGE_REF"
           echo "Verify image exists locally:"
-          docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -F "$(echo $IMAGE_REF)"
+          docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -F "$IMAGE_REF"
 
-      - name: 6. Load Docker Image into Kind Cluster
+      - name: 7. Load Docker Image into Kind Cluster
         run: |
           IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
           echo "Loading image $IMAGE_REF into Kind..."
           kind load docker-image "$IMAGE_REF" --name kind
 
-      - name: 7. Install Nginx Ingress Controller
+      - name: 8. Install Nginx Ingress Controller
         run: |
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
           kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
 
-      - name: 8. Install Cert-Manager CRDs
+      - name: 9. Install Cert-Manager CRDs
         run: |
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.3/cert-manager.crds.yaml
 
-      - name: 9. Install Cert-Manager using Helm
+      - name: 10. Install Cert-Manager using Helm
         run: |
           helm repo add jetstack https://charts.jetstack.io
           helm repo update
@@ -138,15 +144,15 @@ jobs:
             --selector=app.kubernetes.io/instance=cert-manager \
             --timeout=180s
 
-      - name: 10. Apply Kubernetes Manifests (Deployment, Service, TLS)
+      - name: 11. Apply Kubernetes Manifests (Deployment, Service, TLS)
         run: |
           kubectl apply -f kubernetes/
 
-      - name: 11. Wait for Wisecow Deployment to be Ready
+      - name: 12. Wait for Wisecow Deployment to be Ready
         run: |
           kubectl wait --for=condition=Available deployment/wisecow-deployment --timeout=120s
 
-      - name: 12. Verification (E2E TLS Test)
+      - name: 13. Verification (E2E TLS Test)
         run: |
           echo "127.0.0.1 wisecow.yourdomain.com" | sudo tee -a /etc/hosts
           kubectl wait --for=condition=ready certificate/wisecow-tls-secret --timeout=180s
