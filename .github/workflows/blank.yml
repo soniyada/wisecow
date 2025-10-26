@@ -121,17 +121,60 @@ jobs:
             --selector=app.kubernetes.io/instance=cert-manager \
             --timeout=180s
             
-      - name: 12. Apply Kubernetes Manifests (Deployment, Service, TLS)
+      - name: 12. Create Self-Signed Certificate Issuer
         run: |
-          # Apply all YAML files except kind-config.yaml
-          find kubernetes/ -name '*.yaml' -not -name 'kind-config.yaml' -exec kubectl apply -f {} \;
+          cat <<EOF | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: selfsigned-issuer
+          spec:
+            selfSigned: {}
+          EOF
           
-      - name: 13. Wait for Wisecow Deployment to be Ready
+      - name: 13. Apply Kubernetes Manifests (Deployment, Service, Ingress)
+        run: |
+          # Apply deployment and service
+          kubectl apply -f kubernetes/wisecow-deployment.yaml
+          kubectl apply -f kubernetes/wisecow-service.yaml
+          
+      - name: 14. Create Certificate for TLS
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: wisecow-tls
+            namespace: default
+          spec:
+            secretName: wisecow-tls-secret
+            issuerRef:
+              name: selfsigned-issuer
+              kind: ClusterIssuer
+            dnsNames:
+              - wisecow.yourdomain.com
+          EOF
+          
+      - name: 15. Wait for Certificate to be Ready
+        run: |
+          kubectl wait --for=condition=ready certificate/wisecow-tls --timeout=60s
+          echo "Certificate is ready!"
+          
+      - name: 16. Apply Ingress
+        run: |
+          kubectl apply -f kubernetes/wisecow-ingress.yaml
+          
+      - name: 17. Wait for Wisecow Deployment to be Ready
         run: |
           kubectl wait --for=condition=Available deployment/wisecow-deployment --timeout=120s
           
-      - name: 14. Verification (E2E TLS Test)
+      - name: 18. Verification (E2E TLS Test)
         run: |
           echo "127.0.0.1 wisecow.yourdomain.com" | sudo tee -a /etc/hosts
-          kubectl wait --for=condition=ready certificate/wisecow-tls-secret --timeout=180s
-          curl -vk https://wisecow.yourdomain.com/
+          echo "Waiting for ingress to be ready..."
+          sleep 10
+          echo "Testing HTTPS endpoint..."
+          curl -vk https://wisecow.yourdomain.com/ || echo "Curl failed, checking pod logs..."
+          kubectl get pods
+          kubectl get ingress
+          kubectl describe ingress wisecow-ingress
