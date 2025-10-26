@@ -194,7 +194,7 @@ jobs:
           
       - name: 17. Apply Ingress
         run: |
-          kubectl apply -f kubernetes/wisecow-ingress.yaml
+          kubectl apply -f kubernetes/ingress.yaml
           
       - name: 18. Wait for Wisecow Deployment to be Ready
         run: |
