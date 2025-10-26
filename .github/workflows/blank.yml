@@ -69,7 +69,7 @@ jobs:
         uses: helm/kind-action@v1.9.0
         with:
           cluster_name: kind
-          config: kubernetes/kind-config.yaml
+          config: kind-config.yaml
           wait: 120s
 
       - name: 5. Verify Kind Cluster is Running
@@ -123,7 +123,8 @@ jobs:
             
       - name: 12. Apply Kubernetes Manifests (Deployment, Service, TLS)
         run: |
-          kubectl apply -f kubernetes/
+          # Apply all YAML files except kind-config.yaml
+          find kubernetes/ -name '*.yaml' -not -name 'kind-config.yaml' -exec kubectl apply -f {} \;
           
       - name: 13. Wait for Wisecow Deployment to be Ready
         run: |
