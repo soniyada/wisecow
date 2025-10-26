@@ -83,7 +83,7 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Debug: show image_ref from previous job
+      - name: 2. Debug:show image_ref from previous job
         run: |
           echo "IMAGE_REF from previous job: '${{ needs.build-and-push.outputs.image_ref }}'"
 
