@@ -134,8 +134,8 @@ jobs:
           
       - name: 13. Apply Kubernetes Manifests (Deployment, Service, Ingress)
         run: |
-          # Apply deployment and service
-          kubectl apply -f kubernetes/*
+          # Apply all YAML files except kind-config.yaml
+          find kubernetes/ -name '*.yaml' -not -name 'kind-config.yaml' -exec kubectl apply -f {} \;
           
       - name: 14. Create Certificate for TLS
         run: |
@@ -161,7 +161,7 @@ jobs:
           
       - name: 16. Apply Ingress
         run: |
-          kubectl apply -f kubernetes/wisecow-ingress.yaml
+          kubectl apply -f kubernetes/ingress.yaml
           
       - name: 17. Wait for Wisecow Deployment to be Ready
         run: |
