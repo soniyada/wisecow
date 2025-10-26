@@ -50,11 +50,9 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Construct IMAGE_REF directly (WORKAROUND)
+      - name: 2. Construct IMAGE_REF directly
         id: construct_image
         run: |
-          # Reconstruct the image reference using env variables
-          # We know it was pushed with :latest tag
           IMAGE_REF="${{ env.IMAGE_NAME }}:latest"
           echo "Constructed IMAGE_REF: $IMAGE_REF"
           echo "IMAGE_REF=$IMAGE_REF" >> $GITHUB_ENV
@@ -63,43 +61,54 @@ jobs:
         run: |
           echo "IMAGE_REF from environment: $IMAGE_REF"
           if [ -z "$IMAGE_REF" ]; then
-            echo "ERROR: IMAGE_REF is empty. Nothing to load into kind." >&2
+            echo "ERROR: IMAGE_REF is empty." >&2
             exit 1
           fi
           
       - name: 4. Create Kind Cluster with Port Mapping
         uses: helm/kind-action@v1.9.0
         with:
+          cluster_name: kind
           config: kubernetes/kind-config.yaml
+          wait: 120s
 
-      - name: 5. Log in to Docker Hub on deploy runner
+      - name: 5. Verify Kind Cluster is Running
+        run: |
+          echo "Checking Kind cluster status..."
+          kind get clusters
+          kubectl cluster-info --context kind-kind
+          kubectl get nodes
+          echo "Kind cluster is ready!"
+
+      - name: 6. Log in to Docker Hub on deploy runner
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: 6. Pull the pushed image so it's available locally (for kind load)
+      - name: 7. Pull the pushed image so it's available locally
         run: |
           echo "Pulling $IMAGE_REF on the deploy runner..."
           docker pull "$IMAGE_REF"
           echo "Verify image exists locally:"
           docker images | grep wisecow || docker images
           
-      - name: 7. Load Docker Image into Kind Cluster
+      - name: 8. Load Docker Image into Kind Cluster
         run: |
           echo "Loading image $IMAGE_REF into Kind..."
           kind load docker-image "$IMAGE_REF" --name kind
+          echo "Image loaded successfully!"
           
-      - name: 8. Install Nginx Ingress Controller
+      - name: 9. Install Nginx Ingress Controller
         run: |
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
           kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
           
-      - name: 9. Install Cert-Manager CRDs
+      - name: 10. Install Cert-Manager CRDs
         run: |
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.3/cert-manager.crds.yaml
           
-      - name: 10. Install Cert-Manager using Helm
+      - name: 11. Install Cert-Manager using Helm
         run: |
           helm repo add jetstack https://charts.jetstack.io
           helm repo update
@@ -112,15 +121,15 @@ jobs:
             --selector=app.kubernetes.io/instance=cert-manager \
             --timeout=180s
             
-      - name: 11. Apply Kubernetes Manifests (Deployment, Service, TLS)
+      - name: 12. Apply Kubernetes Manifests (Deployment, Service, TLS)
         run: |
           kubectl apply -f kubernetes/
           
-      - name: 12. Wait for Wisecow Deployment to be Ready
+      - name: 13. Wait for Wisecow Deployment to be Ready
         run: |
           kubectl wait --for=condition=Available deployment/wisecow-deployment --timeout=120s
           
-      - name: 13. Verification (E2E TLS Test)
+      - name: 14. Verification (E2E TLS Test)
         run: |
           echo "127.0.0.1 wisecow.yourdomain.com" | sudo tee -a /etc/hosts
           kubectl wait --for=condition=ready certificate/wisecow-tls-secret --timeout=180s
