@@ -48,14 +48,14 @@ jobs:
       - name: 6. Set Image Reference Output
         id: set_image_ref
         run: |
-          # Grab the tags output (may be comma or newline separated)
+          # Grab the tags output (newline or comma separated)
           TAGS='${{ steps.meta.outputs.tags }}'
           echo "meta tags: $TAGS"
 
-          # Split by comma and newline into an array
+          # Split tags into array
           IFS=$'\n,' read -r -a arr <<< "$TAGS"
 
-          # Prefer :latest if present
+          # Pick :latest if available, else first tag
           IMAGE_TAG_REF=""
           for t in "${arr[@]}"; do
             if [[ "$t" == *":latest" ]]; then
@@ -64,7 +64,6 @@ jobs:
             fi
           done
 
-          # Fallback to first tag
           if [ -z "$IMAGE_TAG_REF" ] && [ ${#arr[@]} -gt 0 ]; then
             IMAGE_TAG_REF="${arr[0]}"
           fi
@@ -84,9 +83,9 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Debug:show image_ref from previous job
+      - name: 2. Debug: show image_ref from previous job
         run: |
-          echo "needs.build-and-push.outputs.image_ref='${{ needs.build-and-push.outputs.image_ref }}'"
+          echo "IMAGE_REF from previous job: '${{ needs.build-and-push.outputs.image_ref }}'"
 
       - name: 3. Ensure IMAGE_REF is available
         run: |
