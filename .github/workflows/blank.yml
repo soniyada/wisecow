@@ -51,10 +51,8 @@ jobs:
       - name: 6. Set Image Reference Output
         id: set_image_ref
         run: |
-          # Define the full image tag locally, using the environment variable (which includes the secret).
-          IMAGE_TAG_REF="${{ env.IMAGE_NAME }}:latest"
-          # Pass the single string to the job output
-          echo "image=$IMAGE_TAG_REF" >> $GITHUB_OUTPUT
+         IMAGE_TAG_REF="${{ secrets.DOCKER_USERNAME }}/wisecow:latest"
+         echo "image=$IMAGE_TAG_REF" >> $GITHUB_OUTPUT
 
   deploy-to-kind:
     runs-on: ubuntu-latest
@@ -78,13 +76,9 @@ jobs:
 
       - name: 4. Load Docker Image into Kind Cluster
         run: |
-          # ✅ FINAL FIX: Access the output directly inside the 'run' script (shell context).
-          # This is the guaranteed way to resolve the cross-job variable.
-          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
-          
-          # Check and load the image
-          echo "Loading image $IMAGE_REF into Kind..."
-          kind load docker-image "$IMAGE_REF"
+         IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+         echo "Loading image $IMAGE_REF into Kind..."
+         kind load docker-image "$IMAGE_REF"
 
       # --- Cert-Manager Installation (Standard and Reliable) ---
       - name: 5. Install Cert-Manager CRDs
