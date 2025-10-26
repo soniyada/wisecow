@@ -135,8 +135,7 @@ jobs:
       - name: 13. Apply Kubernetes Manifests (Deployment, Service, Ingress)
         run: |
           # Apply deployment and service
-          kubectl apply -f kubernetes/wisecow-deployment.yaml
-          kubectl apply -f kubernetes/wisecow-service.yaml
+          kubectl apply -f kubernetes/*
           
       - name: 14. Create Certificate for TLS
         run: |
