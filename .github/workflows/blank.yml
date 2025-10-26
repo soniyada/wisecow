@@ -13,8 +13,6 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    outputs:
-      image_ref: ${{ steps.set_image_ref.outputs.image }}
     steps:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
@@ -45,28 +43,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: 6. Set Image Reference Output
-        id: set_image_ref
-        run: |
-          # Get the full tag string from metadata action
-          TAGS='${{ steps.meta.outputs.tags }}'
-          echo "Raw tags output: $TAGS"
-          
-          # The tags come as newline-separated list, get the first one (SHA tag)
-          FIRST_TAG=$(echo "$TAGS" | head -n1)
-          echo "First tag: $FIRST_TAG"
-          
-          # Use the image name with 'latest' tag for simplicity
-          IMAGE_TAG_REF="${{ env.IMAGE_NAME }}:latest"
-          echo "Using image reference: $IMAGE_TAG_REF"
-          
-          # Set the output
-          echo "image=$IMAGE_TAG_REF" >> $GITHUB_OUTPUT
-          
-      - name: 7. Verify output was set
-        run: |
-          echo "Output should be: ${{ steps.set_image_ref.outputs.image }}"
-
   deploy-to-kind:
     runs-on: ubuntu-latest
     needs: build-and-push
@@ -74,18 +50,22 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Debug:Show image_ref from previous job
+      - name: 2. Construct IMAGE_REF directly (WORKAROUND)
+        id: construct_image
         run: |
-          echo "IMAGE_REF from previous job: '${{ needs.build-and-push.outputs.image_ref }}'"
+          # Reconstruct the image reference using env variables
+          # We know it was pushed with :latest tag
+          IMAGE_REF="${{ env.IMAGE_NAME }}:latest"
+          echo "Constructed IMAGE_REF: $IMAGE_REF"
+          echo "IMAGE_REF=$IMAGE_REF" >> $GITHUB_ENV
           
-      - name: 3. Ensure IMAGE_REF is available
+      - name: 3. Verify IMAGE_REF is set
         run: |
-          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+          echo "IMAGE_REF from environment: $IMAGE_REF"
           if [ -z "$IMAGE_REF" ]; then
             echo "ERROR: IMAGE_REF is empty. Nothing to load into kind." >&2
             exit 1
           fi
-          echo "IMAGE_REF=$IMAGE_REF"
           
       - name: 4. Create Kind Cluster with Port Mapping
         uses: helm/kind-action@v1.9.0
@@ -100,15 +80,13 @@ jobs:
 
       - name: 6. Pull the pushed image so it's available locally (for kind load)
         run: |
-          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
           echo "Pulling $IMAGE_REF on the deploy runner..."
           docker pull "$IMAGE_REF"
           echo "Verify image exists locally:"
-          docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -F "$IMAGE_REF" || docker images
+          docker images | grep wisecow || docker images
           
       - name: 7. Load Docker Image into Kind Cluster
         run: |
-          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
           echo "Loading image $IMAGE_REF into Kind..."
           kind load docker-image "$IMAGE_REF" --name kind
           
