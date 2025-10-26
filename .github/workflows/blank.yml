@@ -8,14 +8,12 @@ on:
 
 env:
   REGISTRY: docker.io
-  # Define IMAGE_NAME using the secret, as required by the metadata-action and for clarity
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/wisecow
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
-      # Define the output using the clean variable from step 6
       image_ref: ${{ steps.set_image_ref.outputs.image }}
     steps:
       - name: 1. Checkout repository
@@ -47,77 +45,109 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # 💡 CORRECTED STEP: Set a clean, single-line output that the next job can read.
       - name: 6. Set Image Reference Output
         id: set_image_ref
         run: |
-         IMAGE_TAG_REF="${{ secrets.DOCKER_USERNAME }}/wisecow:latest"
-         echo "image=$IMAGE_TAG_REF" >> $GITHUB_OUTPUT
+          # Make sure we extract a single tag to pass to the next job.
+          TAGS='${{ steps.meta.outputs.tags }}'
+          # split on comma or newline into an array
+          IFS=$'\n,' read -r -a arr <<< "$TAGS"
+
+          # prefer a :latest tag if present
+          IMAGE_TAG_REF=""
+          for t in "${arr[@]}"; do
+            if [[ "$t" == *":latest" ]]; then
+              IMAGE_TAG_REF="$t"
+              break
+            fi
+          done
+
+          # fallback to first tag
+          if [ -z "$IMAGE_TAG_REF" ] && [ ${#arr[@]} -gt 0 ]; then
+            IMAGE_TAG_REF="${arr[0]}"
+          fi
+
+          if [ -z "$IMAGE_TAG_REF" ]; then
+            echo "No image tag could be determined from: $TAGS" >&2
+            exit 1
+          fi
+
+          echo "Determined image: $IMAGE_TAG_REF"
+          echo "image=$IMAGE_TAG_REF" >> $GITHUB_OUTPUT
 
   deploy-to-kind:
     runs-on: ubuntu-latest
     needs: build-and-push
-    
-    # ❌ REMOVED: The job-level 'env' block failed due to cross-job security restrictions.
-    
     steps:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Create Kind Cluster with Port Mapping
+      - name: 2. Ensure IMAGE_REF is available
+        run: |
+          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+          if [ -z "$IMAGE_REF" ]; then
+            echo "ERROR: IMAGE_REF is empty. Nothing to load into kind." >&2
+            exit 1
+          fi
+          echo "IMAGE_REF=$IMAGE_REF" 
+
+      - name: 3. Create Kind Cluster with Port Mapping
         uses: helm/kind-action@v1.9.0
         with:
           config: kubernetes/kind-config.yaml
 
-      - name: 3. Install Nginx Ingress Controller
+      - name: 4. Log in to Docker Hub on deploy runner and pull image
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 5. Pull the pushed image so it's available locally (for kind load)
+        run: |
+          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+          echo "Pulling $IMAGE_REF on the deploy runner..."
+          docker pull "$IMAGE_REF"
+          echo "Verify image exists locally:"
+          docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -F "$(echo $IMAGE_REF)"
+
+      - name: 6. Load Docker Image into Kind Cluster
+        run: |
+          IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+          echo "Loading image $IMAGE_REF into Kind..."
+          kind load docker-image "$IMAGE_REF" --name kind
+
+      - name: 7. Install Nginx Ingress Controller
         run: |
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
           kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
 
-      - name: 4. Load Docker Image into Kind Cluster
-        run: |
-         IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
-         echo "Loading image $IMAGE_REF into Kind..."
-         kind load docker-image "$IMAGE_REF"
-
-      # --- Cert-Manager Installation (Standard and Reliable) ---
-      - name: 5. Install Cert-Manager CRDs
+      - name: 8. Install Cert-Manager CRDs
         run: |
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.3/cert-manager.crds.yaml
 
-      - name: 6. Install Cert-Manager using Helm
+      - name: 9. Install Cert-Manager using Helm
         run: |
           helm repo add jetstack https://charts.jetstack.io
           helm repo update
-
           helm upgrade --install cert-manager jetstack/cert-manager \
             --namespace cert-manager --create-namespace \
             --version v1.14.3 \
             --set installCRDs=false
-          
-          echo "Waiting for Cert-Manager pods to start..."
           kubectl wait --namespace cert-manager \
             --for=condition=ready pod \
             --selector=app.kubernetes.io/instance=cert-manager \
             --timeout=180s
-          
-      - name: 7. Apply Kubernetes Manifests (Deployment, Service, TLS)
+
+      - name: 10. Apply Kubernetes Manifests (Deployment, Service, TLS)
         run: |
-          # Apply the Deployment, Service, ClusterIssuer, and Ingress
           kubectl apply -f kubernetes/
-          
-      - name: 8. Wait for Wisecow Deployment to be Ready
+
+      - name: 11. Wait for Wisecow Deployment to be Ready
         run: |
           kubectl wait --for=condition=Available deployment/wisecow-deployment --timeout=120s
-          
-      - name: 9. Verification (E2E TLS Test)
+
+      - name: 12. Verification (E2E TLS Test)
         run: |
-          # Map dummy domain to the Ingress controller access point (localhost:443)
           echo "127.0.0.1 wisecow.yourdomain.com" | sudo tee -a /etc/hosts
-          
-          # Wait for cert-manager to provision the test cert
-          echo "Waiting for TLS certificate to be provisioned..."
           kubectl wait --for=condition=ready certificate/wisecow-tls-secret --timeout=180s
-          
-          # Test secure TLS communication
           curl -vk https://wisecow.yourdomain.com/
